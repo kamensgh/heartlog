@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { name, photo_url, birthday, anniversary, notes } = body
+    const { name, photo_url, birthday, anniversary, notes, nickname, display_nickname } = body
 
     console.log('Creating/updating profile for user:', user.id, 'with data:', body)
 
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
       console.log('Updating existing profile:', existingProfile.id)
       const { data, error } = await supabase
         .from('spouse_profiles')
-        .update({ name, photo_url, birthday, anniversary, notes })
+        .update({ name, photo_url, birthday, anniversary, notes, nickname, display_nickname })
         .eq('user_id', user.id)
         .select()
         .single()
@@ -88,6 +88,8 @@ export async function POST(request: NextRequest) {
       const cleanData = {
         user_id: user.id,
         name: name || '',
+        nickname: nickname || null,
+        display_nickname: display_nickname ?? false,
         photo_url: photo_url || null,
         birthday: birthday || null,
         anniversary: anniversary || null,
@@ -123,4 +125,4 @@ export async function POST(request: NextRequest) {
     console.error('Unexpected error in POST /api/spouse-profiles:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
-} 
+}
