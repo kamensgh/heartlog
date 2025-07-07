@@ -21,7 +21,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth } from "@/lib/auth-context"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
-import { SpouseProfile, CustomField } from "@/lib/types"
+import { SpouseProfile, CustomField, Reminder } from "@/lib/types"
+import { downloadICS } from "@/lib/utils"
 
 export default function DashboardPage() {
   const { user, signOut, loading } = useAuth()
@@ -34,6 +35,23 @@ export default function DashboardPage() {
 
   const [isEditingProfile, setIsEditingProfile] = useState(false)
   const [newField, setNewField] = useState({ category: "clothing" as "clothing" | "favorites" | "places" | "gifts" | "health", label: "", value: "" })
+
+  const [reminders, setReminders] = useState<Reminder[]>([])
+
+  const [selectedImage, setSelectedImage] = useState<File | null>(null)
+  const [imagePreview, setImagePreview] = useState<string | null>(null)
+  const [isUploadingImage, setIsUploadingImage] = useState(false)
+
+  const [newReminder, setNewReminder] = useState({
+    title: "",
+    type: "custom",
+    date: "",
+    advance_notice_days: 7,
+    enabled: true,
+    notes: ""
+  })
+  const [isAddingReminder, setIsAddingReminder] = useState(false)
+  const [isSavingReminder, setIsSavingReminder] = useState(false)
 
   // Fetch data on component mount
   useEffect(() => {
@@ -70,6 +88,15 @@ export default function DashboardPage() {
       if (fieldsResponse.ok) {
         const fieldsData = await fieldsResponse.json()
         setCustomFields(fieldsData.data || [])
+      }
+
+      // Fetch reminders
+      const remindersResponse = await fetch('/api/reminders', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+      if (remindersResponse.ok) {
+        const remindersData = await remindersResponse.json()
+        setReminders(remindersData.data || [])
       }
     } catch (error) {
       console.error('Error fetching data:', error)
@@ -119,15 +146,11 @@ export default function DashboardPage() {
     {} as Record<string, CustomField[]>,
   )
 
-  const saveProfile = async (profileData: Partial<SpouseProfile>) => {
-    if (!user) return
-    
+  const saveProfile = async (profileData: any) => {
     setIsSaving(true)
     try {
       const token = await getAuthToken()
       if (!token) return
-
-      console.log('Saving profile data:', profileData)
 
       const response = await fetch('/api/spouse-profiles', {
         method: 'POST',
@@ -135,17 +158,19 @@ export default function DashboardPage() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`
         },
-        body: JSON.stringify(profileData)
+        body: JSON.stringify({
+          ...profileData,
+          photo_url: profile?.photo_url || profileData.photo_url
+        })
       })
 
       if (response.ok) {
-        const data = await response.json()
-        console.log('Profile saved successfully:', data)
-        setProfile(data.data)
+        const savedProfile = await response.json()
+        setProfile(savedProfile)
         setIsEditingProfile(false)
+        fetchData()
       } else {
         const errorData = await response.json()
-        console.error('Error saving profile:', errorData)
         alert('Error saving profile: ' + (errorData.error || 'Unknown error'))
       }
     } catch (error) {
@@ -231,6 +256,134 @@ export default function DashboardPage() {
     router.push('/')
   }
 
+  const handleImageSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file) {
+      setSelectedImage(file)
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        setImagePreview(e.target?.result as string)
+      }
+      reader.readAsDataURL(file)
+    }
+  }
+
+  const uploadImage = async () => {
+    if (!selectedImage) return
+    
+    setIsUploadingImage(true)
+    try {
+      const token = await getAuthToken()
+      if (!token) return
+
+      const formData = new FormData()
+      formData.append('file', selectedImage)
+
+      const response = await fetch('/api/upload-image', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        body: formData
+      })
+
+      if (response.ok) {
+        const data = await response.json()
+        setProfile(prev => prev ? { ...prev, photo_url: data.url } : { photo_url: data.url, id: "", user_id: "", name: "", created_at: "", updated_at: "" })
+        setSelectedImage(null)
+        setImagePreview(null)
+      } else {
+        const errorData = await response.json()
+        alert('Error uploading image: ' + (errorData.error || 'Unknown error'))
+      }
+    } catch (error) {
+      console.error('Error uploading image:', error)
+      alert('Error uploading image: ' + error)
+    } finally {
+      setIsUploadingImage(false)
+    }
+  }
+
+  const deleteReminder = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this reminder?')) return
+    
+    try {
+      const token = await getAuthToken()
+      if (!token) return
+
+      const response = await fetch(`/api/reminders?id=${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      })
+
+      if (response.ok) {
+        setReminders(reminders.filter(r => r.id !== id))
+      } else {
+        const errorData = await response.json()
+        alert('Error deleting reminder: ' + (errorData.error || 'Unknown error'))
+      }
+    } catch (error) {
+      console.error('Error deleting reminder:', error)
+      alert('Error deleting reminder: ' + error)
+    }
+  }
+
+  const addReminder = async () => {
+    if (!newReminder.title || !newReminder.date) return
+
+    setIsSavingReminder(true)
+    try {
+      const token = await getAuthToken()
+      if (!token) return
+
+      // Use the existing profile ID from the profile state
+      if (!profile?.id) {
+        alert('Please create a spouse profile first before adding reminders')
+        setIsSavingReminder(false)
+        return
+      }
+
+      const response = await fetch('/api/reminders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          profile_id: profile.id, // Use the actual profile ID
+          type: newReminder.type,
+          title: newReminder.title,
+          date: newReminder.date,
+          enabled: newReminder.enabled,
+          advance_notice_days: newReminder.advance_notice_days,
+          notes: newReminder.notes
+        })
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        setReminders([...reminders, result.data])
+        setNewReminder({
+          title: "",
+          type: "custom",
+          date: "",
+          advance_notice_days: 7,
+          enabled: true,
+          notes: ""
+        })
+        setIsAddingReminder(false)
+      } else {
+        const errorData = await response.json()
+        alert('Error creating reminder: ' + (errorData.error || 'Unknown error'))
+      }
+    } catch (error) {
+      console.error('Error creating reminder:', error)
+      alert('Error creating reminder: ' + error)
+    } finally {
+      setIsSavingReminder(false)
+    }
+  }
+
   if (loading || isLoading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50 flex items-center justify-center">
@@ -312,20 +465,23 @@ export default function DashboardPage() {
               <div className="flex items-center gap-4">
                 <div className="relative">
                   <Avatar className="h-20 w-20">
-                    <AvatarImage src={profile?.photo_url || "/placeholder.svg"} alt={profile?.name || "Partner"} />
+                    <AvatarImage src={profile?.photo_url || imagePreview || "/placeholder.svg"} alt={profile?.name || "Partner"} />
                     <AvatarFallback className="text-lg">
                       {profile?.name
                         ? profile.name.split(" ").map((n) => n[0]).join("")
                         : "P"}
                     </AvatarFallback>
                   </Avatar>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="absolute -bottom-2 -right-2 h-8 w-8 rounded-full p-0 bg-transparent"
-                  >
-                    <Camera className="h-4 w-4" />
-                  </Button>
+                  <label htmlFor="image-upload" className="absolute -bottom-2 -right-2 h-8 w-8 rounded-full p-0 bg-white border-2 border-gray-300 hover:border-pink-500 cursor-pointer flex items-center justify-center">
+                    <Camera className="h-4 w-4 text-gray-600" />
+                  </label>
+                  <input
+                    id="image-upload"
+                    type="file"
+                    accept="image/*"
+                    onChange={handleImageSelect}
+                    className="hidden"
+                  />
                 </div>
                 <div>
                   <h2 className="text-2xl font-semibold text-gray-900">{profile?.name || "Add Partner Details"}</h2>
@@ -339,12 +495,40 @@ export default function DashboardPage() {
                     {profile ? "Edit Profile" : "Add Profile"}
                   </Button>
                 </DialogTrigger>
-                <DialogContent>
+                <DialogContent className="max-w-md">
                   <DialogHeader>
                     <DialogTitle>{profile ? "Edit Profile" : "Add Partner Profile"}</DialogTitle>
                     <DialogDescription>Update your partner's basic information</DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4">
+                    {/* Image Upload Section */}
+                    <div className="space-y-2">
+                      <Label>Profile Picture</Label>
+                      <div className="flex items-center gap-4">
+                        <Avatar className="h-16 w-16">
+                          <AvatarImage src={profile?.photo_url || imagePreview || "/placeholder.svg"} alt="Profile" />
+                          <AvatarFallback>P</AvatarFallback>
+                        </Avatar>
+                        <div className="flex-1 space-y-2">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            onChange={handleImageSelect}
+                            className="block w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-pink-50 file:text-pink-700 hover:file:bg-pink-100"
+                          />
+                          {selectedImage && (
+                            <Button 
+                              onClick={uploadImage} 
+                              disabled={isUploadingImage}
+                              size="sm"
+                              className="w-full"
+                            >
+                              {isUploadingImage ? "Uploading..." : "Upload Image"}
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                     <div>
                       <Label htmlFor="name">Name</Label>
                       <Input
@@ -386,7 +570,8 @@ export default function DashboardPage() {
                           name: profile?.name || "",
                           birthday: profile?.birthday || undefined,
                           anniversary: profile?.anniversary || undefined,
-                          notes: profile?.notes || ""
+                          notes: profile?.notes || "",
+                          photo_url: profile?.photo_url || undefined
                         }
                         saveProfile(profileData)
                       }} 
@@ -559,6 +744,46 @@ export default function DashboardPage() {
                 </TabsContent>
               ))}
             </Tabs>
+          </CardContent>
+        </Card>
+
+        {/* Reminders Card */}
+        <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
+          <CardHeader>
+            <CardTitle>Upcoming Reminders</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {reminders.length === 0 ? (
+              <div className="text-center text-gray-500">No reminders set. <Link href="/reminders" className="text-pink-500 underline">Add one</Link>.</div>
+            ) : (
+              reminders.map(reminder => (
+                <div key={reminder.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg border">
+                  <div>
+                    <div className="font-semibold text-gray-900">{reminder.title}</div>
+                    <div className="text-sm text-gray-600">{new Date(reminder.date).toLocaleDateString()} ({reminder.type})</div>
+                    {reminder.notes && <div className="text-xs text-gray-500 mt-1">{reminder.notes}</div>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      onClick={() => downloadICS({
+                        title: reminder.title,
+                        date: reminder.date,
+                        notes: reminder.notes
+                      })}
+                      className="text-blue-600 hover:text-blue-700"
+                    >
+                      <Calendar className="h-4 w-4 mr-1" />
+                      Save to Calendar
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => deleteReminder(reminder.id)}>
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
           </CardContent>
         </Card>
 

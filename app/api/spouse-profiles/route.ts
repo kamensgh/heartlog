@@ -48,79 +48,66 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { name, photo_url, birthday, anniversary, notes } = body
+    const { name, birthday, anniversary, notes, photo_url } = body
 
-    console.log('Creating/updating profile for user:', user.id, 'with data:', body)
+    console.log('Creating/updating profile for user:', user.id, 'with data:', { name, birthday, anniversary, notes, photo_url })
 
-    // Check if profile already exists
-    const { data: existingProfile, error: checkError } = await supabase
+    // Clean the data
+    const cleanData = {
+      user_id: user.id,
+      name: name || null,
+      photo_url: photo_url || null,
+      birthday: birthday || null,
+      anniversary: anniversary || null,
+      notes: notes || null
+    }
+
+    // Remove empty strings and convert to null
+    Object.keys(cleanData).forEach(key => {
+      if (cleanData[key as keyof typeof cleanData] === '') {
+        cleanData[key as keyof typeof cleanData] = null
+      }
+    })
+
+    console.log('Clean data for insert:', cleanData)
+
+    // Check if profile exists
+    const { data: existingProfile } = await supabase
       .from('spouse_profiles')
-      .select('id')
+      .select('*')
       .eq('user_id', user.id)
       .single()
-
-    if (checkError && checkError.code !== 'PGRST116') {
-      console.error('Error checking existing profile:', checkError)
-      return NextResponse.json({ error: checkError.message }, { status: 500 })
-    }
 
     let result
     if (existingProfile) {
       // Update existing profile
-      console.log('Updating existing profile:', existingProfile.id)
-      const { data, error } = await supabase
+      console.log('Updating existing profile for user:', user.id)
+      result = await supabase
         .from('spouse_profiles')
-        .update({ name, photo_url, birthday, anniversary, notes })
+        .update(cleanData)
         .eq('user_id', user.id)
         .select()
         .single()
-
-      if (error) {
-        console.error('Error updating profile:', error)
-        return NextResponse.json({ error: error.message }, { status: 500 })
-      }
-      result = data
     } else {
-      // Create new profile using raw SQL to bypass RLS
+      // Create new profile
       console.log('Creating new profile for user:', user.id)
-      
-      // Clean the data to avoid empty string issues
-      const cleanData = {
-        user_id: user.id,
-        name: name || '',
-        photo_url: photo_url || null,
-        birthday: birthday || null,
-        anniversary: anniversary || null,
-        notes: notes || null
-      }
-      
-      // Remove undefined values
-      Object.keys(cleanData).forEach(key => {
-        if (cleanData[key as keyof typeof cleanData] === undefined) {
-          delete cleanData[key as keyof typeof cleanData]
-        }
-      })
-      
-      console.log('Clean data for insert:', cleanData)
-      
-      // Direct insert (RLS should be disabled for testing)
-      const { data, error } = await supabase
+      result = await supabase
         .from('spouse_profiles')
         .insert(cleanData)
         .select()
         .single()
-
-      if (error) {
-        console.error('Error creating profile:', error)
-        return NextResponse.json({ error: error.message }, { status: 500 })
-      }
-      result = data
     }
 
-    console.log('Profile operation successful:', result)
-    return NextResponse.json({ data: result })
+    if (result.error) {
+      console.error('Error creating profile:', result.error)
+      return NextResponse.json({ error: result.error.message }, { status: 500 })
+    }
+
+    console.log('Profile operation successful:', result.data)
+    return NextResponse.json(result.data)
+
   } catch (error) {
-    console.error('Unexpected error in POST /api/spouse-profiles:', error)
+    console.error('Error in profile operation:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 } 
