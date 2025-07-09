@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Bell, Calendar, Gift, Heart, Plus, Trash2, ArrowLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -18,91 +18,210 @@ import {
 } from "@/components/ui/dialog"
 import { Badge } from "@/components/ui/badge"
 import Link from "next/link"
+import { useAuth } from "@/lib/auth-context"
+import { supabase } from "@/lib/supabaseClient"
+import { downloadICS } from "@/lib/utils"
 
 interface Reminder {
   id: string
+  user_id: string
+  profile_id: string
   title: string
   type: "birthday" | "anniversary" | "custom"
   date: string
-  daysAdvance: number
+  advance_notice_days: number
   enabled: boolean
-  recurring: boolean
+  notes?: string
+  created_at: string
+  updated_at: string
 }
 
 export default function RemindersPage() {
-  const [reminders, setReminders] = useState<Reminder[]>([
-    {
-      id: "1",
-      title: "Sarah's Birthday",
-      type: "birthday",
-      date: "2024-05-15",
-      daysAdvance: 7,
-      enabled: true,
-      recurring: true,
-    },
-    {
-      id: "2",
-      title: "Anniversary",
-      type: "anniversary",
-      date: "2024-09-22",
-      daysAdvance: 14,
-      enabled: true,
-      recurring: true,
-    },
-    {
-      id: "3",
-      title: "Valentine's Day",
-      type: "custom",
-      date: "2024-02-14",
-      daysAdvance: 7,
-      enabled: true,
-      recurring: true,
-    },
-  ])
+  const { user } = useAuth()
+  const [reminders, setReminders] = useState<Reminder[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   const [newReminder, setNewReminder] = useState<Partial<Reminder>>({
     title: "",
     type: "custom",
     date: "",
-    daysAdvance: 7,
+    advance_notice_days: 7,
     enabled: true,
-    recurring: true,
+    notes: ""
   })
 
   const [isAddingReminder, setIsAddingReminder] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
 
-  const addReminder = () => {
-    if (newReminder.title && newReminder.date) {
-      const reminder: Reminder = {
-        id: Date.now().toString(),
-        title: newReminder.title,
-        type: newReminder.type as "birthday" | "anniversary" | "custom",
-        date: newReminder.date,
-        daysAdvance: newReminder.daysAdvance || 7,
-        enabled: newReminder.enabled || true,
-        recurring: newReminder.recurring || true,
-      }
-      setReminders([...reminders, reminder])
-      setNewReminder({
-        title: "",
-        type: "custom",
-        date: "",
-        daysAdvance: 7,
-        enabled: true,
-        recurring: true,
+  // Fetch reminders from API
+  const fetchReminders = async () => {
+    try {
+      setLoading(true)
+      const token = await getAuthToken()
+      if (!token) return
+
+      const response = await fetch('/api/reminders', {
+        headers: { Authorization: `Bearer ${token}` }
       })
-      setIsAddingReminder(false)
+
+      if (response.ok) {
+        const result = await response.json()
+        setReminders(result.data || [])
+      } else {
+        const errorData = await response.json()
+        setError('Failed to fetch reminders: ' + (errorData.error || 'Unknown error'))
+      }
+    } catch (error) {
+      console.error('Error fetching reminders:', error)
+      setError('Failed to fetch reminders')
+    } finally {
+      setLoading(false)
     }
   }
 
-  const toggleReminder = (id: string) => {
-    setReminders(
-      reminders.map((reminder) => (reminder.id === id ? { ...reminder, enabled: !reminder.enabled } : reminder)),
-    )
+  // Get auth token helper
+  const getAuthToken = async () => {
+    if (!user) return null
+    const { data: { session } } = await supabase.auth.getSession()
+    return session?.access_token
   }
 
-  const deleteReminder = (id: string) => {
-    setReminders(reminders.filter((reminder) => reminder.id !== id))
+  useEffect(() => {
+    if (user) {
+      fetchReminders()
+    }
+  }, [user])
+
+  const addReminder = async () => {
+    if (!newReminder.title || !newReminder.date) return
+
+    setIsSaving(true)
+    try {
+      const token = await getAuthToken()
+      if (!token) return
+
+      // First, get the user's profile to get the correct profile_id
+      const profileResponse = await fetch('/api/spouse-profiles', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+
+      if (!profileResponse.ok) {
+        alert('Please create a spouse profile first before adding reminders')
+        setIsSaving(false)
+        return
+      }
+
+      const profileResult = await profileResponse.json()
+      const profile = profileResult.data || profileResult // Handle both response formats
+
+      if (!profile) {
+        alert('Please create a spouse profile first before adding reminders')
+        setIsSaving(false)
+        return
+      }
+
+      const response = await fetch('/api/reminders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          profile_id: profile.id, // Use the actual profile ID
+          type: newReminder.type,
+          title: newReminder.title,
+          date: newReminder.date,
+          enabled: newReminder.enabled,
+          advance_notice_days: newReminder.advance_notice_days,
+          notes: newReminder.notes
+        })
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        setReminders([...reminders, result.data])
+        setNewReminder({
+          title: "",
+          type: "custom",
+          date: "",
+          advance_notice_days: 7,
+          enabled: true,
+          notes: ""
+        })
+        setIsAddingReminder(false)
+      } else {
+        const errorData = await response.json()
+        alert('Error creating reminder: ' + (errorData.error || 'Unknown error'))
+      }
+    } catch (error) {
+      console.error('Error creating reminder:', error)
+      alert('Error creating reminder: ' + error)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const toggleReminder = async (id: string) => {
+    const reminder = reminders.find(r => r.id === id)
+    if (!reminder) return
+
+    try {
+      const token = await getAuthToken()
+      if (!token) return
+
+      const response = await fetch('/api/reminders', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          id: reminder.id,
+          type: reminder.type,
+          title: reminder.title,
+          date: reminder.date,
+          enabled: !reminder.enabled,
+          advance_notice_days: reminder.advance_notice_days,
+          notes: reminder.notes
+        })
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        setReminders(reminders.map(r => r.id === id ? result.data : r))
+      } else {
+        const errorData = await response.json()
+        alert('Error updating reminder: ' + (errorData.error || 'Unknown error'))
+      }
+    } catch (error) {
+      console.error('Error updating reminder:', error)
+      alert('Error updating reminder: ' + error)
+    }
+  }
+
+  const deleteReminder = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this reminder?')) return
+
+    try {
+      const token = await getAuthToken()
+      if (!token) return
+
+      const response = await fetch(`/api/reminders?id=${id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      })
+
+      if (response.ok) {
+        setReminders(reminders.filter(r => r.id !== id))
+      } else {
+        const errorData = await response.json()
+        alert('Error deleting reminder: ' + (errorData.error || 'Unknown error'))
+      }
+    } catch (error) {
+      console.error('Error deleting reminder:', error)
+      alert('Error deleting reminder: ' + error)
+    }
   }
 
   const getTypeIcon = (type: string) => {
@@ -125,6 +244,90 @@ export default function RemindersPage() {
       default:
         return "bg-purple-100 text-purple-800"
     }
+  }
+
+  const addQuickReminder = async (title: string, date: string, type: "birthday" | "anniversary" | "custom") => {
+    setIsSaving(true)
+    try {
+      const token = await getAuthToken()
+      if (!token) return
+
+      // First, get the user's profile to get the correct profile_id
+      const profileResponse = await fetch('/api/spouse-profiles', {
+        headers: { Authorization: `Bearer ${token}` }
+      })
+
+      if (!profileResponse.ok) {
+        alert('Please create a spouse profile first before adding reminders')
+        setIsSaving(false)
+        return
+      }
+
+      const profileResult = await profileResponse.json()
+      const profile = profileResult.data || profileResult
+
+      if (!profile) {
+        alert('Please create a spouse profile first before adding reminders')
+        setIsSaving(false)
+        return
+      }
+
+      const response = await fetch('/api/reminders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          profile_id: profile.id,
+          type: type,
+          title: title,
+          date: date,
+          enabled: true,
+          advance_notice_days: 7,
+          notes: `Quick reminder for ${title}`
+        })
+      })
+
+      if (response.ok) {
+        const result = await response.json()
+        setReminders([...reminders, result.data])
+        alert(`${title} reminder added successfully!`)
+      } else {
+        const errorData = await response.json()
+        alert('Error creating reminder: ' + (errorData.error || 'Unknown error'))
+      }
+    } catch (error) {
+      console.error('Error creating reminder:', error)
+      alert('Error creating reminder: ' + error)
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50 p-4 font-system">
+        <div className="max-w-4xl mx-auto">
+          <div className="text-center py-8">
+            <p>Loading reminders...</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-pink-50 to-purple-50 p-4 font-system">
+        <div className="max-w-4xl mx-auto">
+          <div className="text-center py-8 text-red-600">
+            <p>Error: {error}</p>
+            <Button onClick={fetchReminders} className="mt-4">Retry</Button>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -195,8 +398,8 @@ export default function RemindersPage() {
                 <div>
                   <Label htmlFor="advance">Remind me (days in advance)</Label>
                   <Select
-                    value={newReminder.daysAdvance?.toString()}
-                    onValueChange={(value) => setNewReminder({ ...newReminder, daysAdvance: Number.parseInt(value) })}
+                    value={newReminder.advance_notice_days?.toString()}
+                    onValueChange={(value) => setNewReminder({ ...newReminder, advance_notice_days: Number.parseInt(value) })}
                   >
                     <SelectTrigger>
                       <SelectValue />
@@ -210,16 +413,17 @@ export default function RemindersPage() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <Switch
-                    id="recurring"
-                    checked={newReminder.recurring}
-                    onCheckedChange={(checked) => setNewReminder({ ...newReminder, recurring: checked })}
+                <div>
+                  <Label htmlFor="notes">Notes (optional)</Label>
+                  <Input
+                    id="notes"
+                    value={newReminder.notes || ""}
+                    onChange={(e) => setNewReminder({ ...newReminder, notes: e.target.value })}
+                    placeholder="Additional notes..."
                   />
-                  <Label htmlFor="recurring">Repeat annually</Label>
                 </div>
-                <Button onClick={addReminder} className="w-full">
-                  Create Reminder
+                <Button onClick={addReminder} className="w-full" disabled={isSaving}>
+                  {isSaving ? "Creating..." : "Create Reminder"}
                 </Button>
               </div>
             </DialogContent>
@@ -244,15 +448,28 @@ export default function RemindersPage() {
                     <div>
                       <h3 className="font-semibold text-gray-900">{reminder.title}</h3>
                       <p className="text-sm text-gray-600">
-                        {new Date(reminder.date).toLocaleDateString()} • {reminder.daysAdvance} days advance
+                        {new Date(reminder.date).toLocaleDateString()} • {reminder.advance_notice_days} days advance
                       </p>
+                      {reminder.notes && (
+                        <p className="text-xs text-gray-500 mt-1">{reminder.notes}</p>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Badge variant="secondary" className="text-xs">
-                      {reminder.recurring ? "Annual" : "One-time"}
-                    </Badge>
                     <Switch checked={reminder.enabled} onCheckedChange={() => toggleReminder(reminder.id)} />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => downloadICS({
+                        title: reminder.title,
+                        date: reminder.date,
+                        notes: reminder.notes
+                      })}
+                      className="text-blue-600 hover:text-blue-700"
+                    >
+                      <Calendar className="h-4 w-4 mr-1" />
+                      Save to Calendar
+                    </Button>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -296,15 +513,28 @@ export default function RemindersPage() {
                       <div>
                         <h3 className="font-semibold text-gray-900">{reminder.title}</h3>
                         <p className="text-sm text-gray-600">
-                          {new Date(reminder.date).toLocaleDateString()} • {reminder.daysAdvance} days advance
+                          {new Date(reminder.date).toLocaleDateString()} • {reminder.advance_notice_days} days advance
                         </p>
+                        {reminder.notes && (
+                          <p className="text-xs text-gray-500 mt-1">{reminder.notes}</p>
+                        )}
                       </div>
                     </div>
                     <div className="flex items-center gap-2">
-                      <Badge variant="secondary" className="text-xs">
-                        {reminder.recurring ? "Annual" : "One-time"}
-                      </Badge>
                       <Switch checked={reminder.enabled} onCheckedChange={() => toggleReminder(reminder.id)} />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => downloadICS({
+                          title: reminder.title,
+                          date: reminder.date,
+                          notes: reminder.notes
+                        })}
+                        className="text-blue-600 hover:text-blue-700"
+                      >
+                        <Calendar className="h-4 w-4 mr-1" />
+                        Save to Calendar
+                      </Button>
                       <Button
                         variant="ghost"
                         size="sm"
@@ -328,17 +558,32 @@ export default function RemindersPage() {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Button variant="outline" className="h-auto p-4 flex flex-col items-center gap-2 bg-transparent">
+              <Button 
+                variant="outline" 
+                className="h-auto p-4 flex flex-col items-center gap-2 bg-transparent"
+                onClick={() => addQuickReminder("Valentine's Day", "2025-02-14", "custom")}
+                disabled={isSaving}
+              >
                 <Heart className="h-6 w-6 text-pink-500" />
                 <span className="font-medium">Valentine's Day</span>
                 <span className="text-xs text-gray-500">February 14th</span>
               </Button>
-              <Button variant="outline" className="h-auto p-4 flex flex-col items-center gap-2 bg-transparent">
+              <Button 
+                variant="outline" 
+                className="h-auto p-4 flex flex-col items-center gap-2 bg-transparent"
+                onClick={() => addQuickReminder("Christmas", "2025-12-25", "custom")}
+                disabled={isSaving}
+              >
                 <Gift className="h-6 w-6 text-blue-500" />
                 <span className="font-medium">Christmas</span>
                 <span className="text-xs text-gray-500">December 25th</span>
               </Button>
-              <Button variant="outline" className="h-auto p-4 flex flex-col items-center gap-2 bg-transparent">
+              <Button 
+                variant="outline" 
+                className="h-auto p-4 flex flex-col items-center gap-2 bg-transparent"
+                onClick={() => addQuickReminder("New Year", "2026-01-01", "custom")}
+                disabled={isSaving}
+              >
                 <Calendar className="h-6 w-6 text-purple-500" />
                 <span className="font-medium">New Year</span>
                 <span className="text-xs text-gray-500">January 1st</span>
