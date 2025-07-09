@@ -11,6 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { useAuth } from "@/lib/auth-context"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 
 export default function AuthPage() {
   const [showPassword, setShowPassword] = useState(false)
@@ -21,8 +22,11 @@ export default function AuthPage() {
     confirmPassword: "",
     agreeToTerms: false,
   })
+  const [showForgotPassword, setShowForgotPassword] = useState(false)
+  const [resetEmail, setResetEmail] = useState("")
+  const [resetStatus, setResetStatus] = useState<string | null>(null)
   
-  const { signIn, signUp, error } = useAuth()
+  const { signIn, signUp, resetPassword, error } = useAuth()
   const router = useRouter()
 
   const handleSignIn = async (e: React.FormEvent) => {
@@ -48,6 +52,18 @@ export default function AuthPage() {
       router.push('/dashboard')
     }
     setIsLoading(false)
+  }
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setResetStatus(null)
+    if (!resetEmail) return setResetStatus("Please enter your email.")
+    const { error } = await resetPassword(resetEmail)
+    if (error) {
+      setResetStatus(error.message || "Failed to send reset email.")
+    } else {
+      setResetStatus("Password reset email sent! Check your inbox.")
+    }
   }
 
   return (
@@ -129,7 +145,12 @@ export default function AuthPage() {
                       {isLoading ? "Signing In..." : "Sign In Securely"}
                     </Button>
                     <div className="text-center">
-                      <Button variant="link" className="text-sm text-gray-600">
+                      <Button
+                        variant="link"
+                        className="text-sm text-gray-600"
+                        type="button"
+                        onClick={() => setShowForgotPassword(true)}
+                      >
                         Forgot your password?
                       </Button>
                     </div>
@@ -210,6 +231,36 @@ export default function AuthPage() {
             </Tabs>
           </CardContent>
         </Card>
+
+        {/* Forgot Password Dialog */}
+        <Dialog open={showForgotPassword} onOpenChange={setShowForgotPassword}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Reset your password</DialogTitle>
+              <DialogDescription>
+                Enter your email address and we'll send you a password reset link.
+              </DialogDescription>
+            </DialogHeader>
+            <form onSubmit={handleForgotPassword} className="space-y-4">
+              <Input
+                type="email"
+                placeholder="your@email.com"
+                value={resetEmail}
+                onChange={e => setResetEmail(e.target.value)}
+                required
+              />
+              {resetStatus && <p className="text-sm text-center text-pink-600">{resetStatus}</p>}
+              <div className="flex gap-2 justify-end">
+                <Button type="button" variant="ghost" onClick={() => setShowForgotPassword(false)}>
+                  Cancel
+                </Button>
+                <Button type="submit" className="bg-pink-500 hover:bg-pink-600">
+                  Send Reset Link
+                </Button>
+              </div>
+            </form>
+          </DialogContent>
+        </Dialog>
 
         {/* Security Features */}
         <Card className="bg-white/80 backdrop-blur-sm border-0 shadow-lg">
