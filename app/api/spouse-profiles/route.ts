@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { name, photo_url, birthday, anniversary, notes } = body
+    const { name, nickname, display_nickname, photo_url, birthday, anniversary, notes } = body
 
     console.log('Creating/updating profile for user:', user.id, 'with data:', body)
 
@@ -70,7 +70,7 @@ export async function POST(request: NextRequest) {
       console.log('Updating existing profile:', existingProfile.id)
       const { data, error } = await supabase
         .from('spouse_profiles')
-        .update({ name, photo_url, birthday, anniversary, notes })
+        .update({ name, nickname, display_nickname, photo_url, birthday, anniversary, notes })
         .eq('user_id', user.id)
         .select()
         .single()
@@ -88,6 +88,8 @@ export async function POST(request: NextRequest) {
       const cleanData = {
         user_id: user.id,
         name: name || '',
+        nickname: nickname || null,
+        display_nickname: typeof display_nickname === 'boolean' ? display_nickname : false,
         photo_url: photo_url || null,
         birthday: birthday || null,
         anniversary: anniversary || null,
