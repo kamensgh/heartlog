@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Calendar, Heart, Gift, Settings, Bell, Lock, Plus, Edit2, Camera, ArrowLeft, LogOut } from "lucide-react"
+import { Calendar, Heart, Gift, Settings, Bell, Lock, Plus, Edit2, Camera, ArrowLeft, LogOut, Shirt, Star, MapPin, Gift as GiftIcon, Stethoscope } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -34,7 +34,35 @@ export default function DashboardPage() {
   const [isSaving, setIsSaving] = useState(false)
 
   const [isEditingProfile, setIsEditingProfile] = useState(false)
-  const [newField, setNewField] = useState({ category: "clothing" as "clothing" | "favorites" | "places" | "gifts" | "health", label: "", value: "" })
+  // Dynamic fields for Add Detail
+  const categoryFieldMap: Record<string, { label: string; name: string; placeholder?: string }[]> = {
+    clothing: [
+      { label: "Type", name: "label", placeholder: "e.g., Shirt, Pants" },
+      { label: "Size", name: "size", placeholder: "e.g., M, 32W" },
+      { label: "Brand", name: "brand", placeholder: "e.g., Levi's" },
+      { label: "Color", name: "color", placeholder: "e.g., Blue" },
+    ],
+    favorites: [
+      { label: "Type", name: "label", placeholder: "e.g., Food, Movie" },
+      { label: "Favorite", name: "favorite", placeholder: "e.g., Pizza, Inception" },
+    ],
+    places: [
+      { label: "Place Name", name: "label", placeholder: "e.g., Paris" },
+      { label: "Location", name: "location", placeholder: "e.g., France" },
+      { label: "Note", name: "note", placeholder: "e.g., Honeymoon" },
+    ],
+    gifts: [
+      { label: "Gift Idea", name: "label", placeholder: "e.g., Necklace" },
+      { label: "Occasion", name: "occasion", placeholder: "e.g., Birthday" },
+      { label: "From/Link", name: "from", placeholder: "e.g., Amazon, https://..." },
+    ],
+    health: [
+      { label: "Type", name: "label", placeholder: "e.g., Allergy, Medication" },
+      { label: "Details", name: "details", placeholder: "e.g., Peanuts, Ibuprofen" },
+    ],
+  }
+
+  const [newField, setNewField] = useState<any>({ category: "clothing", label: "", size: "", brand: "", color: "", favorite: "", note: "", occasion: "", details: "" })
 
   const [reminders, setReminders] = useState<Reminder[]>([])
 
@@ -182,27 +210,23 @@ export default function DashboardPage() {
   }
 
   const addCustomField = async () => {
-    if (!newField.category || !newField.label || !newField.value) {
-      alert('Please fill in all fields')
-      return
+    const requiredFields = categoryFieldMap[newField.category].map(f => f.name)
+    for (const field of requiredFields) {
+      if (!newField[field]) {
+        alert('Please fill in all fields')
+        return
+      }
     }
-    
     if (!profile) {
       alert('Please create a partner profile first')
       return
     }
-    
     try {
       const token = await getAuthToken()
       if (!token) return
-
-      console.log('Adding custom field:', {
-        profile_id: profile.id,
-        category: newField.category,
-        label: newField.label,
-        value: newField.value
-      })
-
+      // Compose label and value for storage/display
+      let label = newField.label
+      let value = requiredFields.filter(f => f !== 'label' && newField[f]).map(f => newField[f]).join(' | ')
       const response = await fetch('/api/custom-fields', {
         method: 'POST',
         headers: {
@@ -212,23 +236,20 @@ export default function DashboardPage() {
         body: JSON.stringify({
           profile_id: profile.id,
           category: newField.category,
-          label: newField.label,
-          value: newField.value
+          label,
+          value
         })
       })
-
       if (response.ok) {
         const data = await response.json()
-        console.log('Custom field added successfully:', data)
         setCustomFields([...customFields, data.data])
-        setNewField({ category: "clothing", label: "", value: "" })
+        // Reset all fields
+        setNewField({ category: newField.category, ...Object.fromEntries(requiredFields.map(f => [f, ""])) })
       } else {
         const errorData = await response.json()
-        console.error('Error adding custom field:', errorData)
         alert('Error adding field: ' + (errorData.error || 'Unknown error'))
       }
     } catch (error) {
-      console.error('Error adding field:', error)
       alert('Error adding field: ' + error)
     }
   }
@@ -382,6 +403,15 @@ export default function DashboardPage() {
     } finally {
       setIsSavingReminder(false)
     }
+  }
+
+  // Icon map for categories
+  const categoryIconMap: Record<string, JSX.Element> = {
+    clothing: <Shirt className="h-4 w-4 mr-2" />,
+    favorites: <Star className="h-4 w-4 mr-2" />,
+    places: <MapPin className="h-4 w-4 mr-2" />,
+    gifts: <GiftIcon className="h-4 w-4 mr-2" />,
+    health: <Stethoscope className="h-4 w-4 mr-2" />,
   }
 
   if (loading || isLoading) {
@@ -650,61 +680,6 @@ export default function DashboardPage() {
           <CardHeader>
             <div className="flex items-center justify-between">
               <CardTitle>Details & Information</CardTitle>
-              <Dialog>
-                <DialogTrigger asChild>
-                  <Button size="sm">
-                    <Plus className="h-4 w-4 mr-2" />
-                    Add Detail
-                  </Button>
-                </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>Add New Detail</DialogTitle>
-                    <DialogDescription>Add a new piece of information about your partner</DialogDescription>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    <div>
-                      <Label htmlFor="category">Category</Label>
-                      <Select
-                        value={newField.category}
-                        onValueChange={(value) => setNewField({ ...newField, category: value as "clothing" | "favorites" | "places" | "gifts" | "health" })}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select category" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="clothing">Clothing</SelectItem>
-                          <SelectItem value="favorites">Favorites</SelectItem>
-                          <SelectItem value="places">Important Places</SelectItem>
-                          <SelectItem value="gifts">Gift Ideas</SelectItem>
-                          <SelectItem value="health">Health</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label htmlFor="label">Label</Label>
-                      <Input
-                        id="label"
-                        value={newField.label}
-                        onChange={(e) => setNewField({ ...newField, label: e.target.value })}
-                        placeholder="e.g., Favorite Color"
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor="value">Value</Label>
-                      <Input
-                        id="value"
-                        value={newField.value}
-                        onChange={(e) => setNewField({ ...newField, value: e.target.value })}
-                        placeholder="e.g., Blue"
-                      />
-                    </div>
-                    <Button onClick={addCustomField} className="w-full">
-                      Add Detail
-                    </Button>
-                  </div>
-                </DialogContent>
-              </Dialog>
             </div>
           </CardHeader>
           <CardContent>
@@ -719,9 +694,72 @@ export default function DashboardPage() {
               </TabsList>
 
               <TabsContent value="all" className="space-y-4">
+                <div className="flex justify-end mb-2 mt-6">
+                  <Dialog>
+                    <DialogTrigger asChild>
+                      <Button size="sm">
+                        <Plus className="h-4 w-4 mr-2" />Add Detail
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>Add New Detail</DialogTitle>
+                        <DialogDescription>Add a new piece of information about your partner</DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <div>
+                          <Label htmlFor="category">Category</Label>
+                          <Select
+                            value={newField.category}
+                            onValueChange={(value) => setNewField({ ...newField, category: value as "clothing" | "favorites" | "places" | "gifts" | "health" })}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select category" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="clothing">Clothing</SelectItem>
+                              <SelectItem value="favorites">Favorites</SelectItem>
+                              <SelectItem value="places">Important Places</SelectItem>
+                              <SelectItem value="gifts">Gift Ideas</SelectItem>
+                              <SelectItem value="health">Health</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {/* Dynamic fields based on category */}
+                        {categoryFieldMap[newField.category].map((field) => (
+                          <div key={field.name}>
+                            <Label htmlFor={field.name}>{field.label}</Label>
+                            {field.name === "note" ? (
+                              <Textarea
+                                id={field.name}
+                                value={newField[field.name] || ""}
+                                onChange={e => setNewField({ ...newField, [field.name]: e.target.value })}
+                                placeholder={field.placeholder}
+                                rows={3}
+                              />
+                            ) : (
+                              <Input
+                                id={field.name}
+                                value={newField[field.name] || ""}
+                                onChange={e => setNewField({ ...newField, [field.name]: e.target.value })}
+                                placeholder={field.placeholder}
+                              />
+                            )}
+                          </div>
+                        ))}
+                        <Button onClick={addCustomField} className="w-full">
+                          Add Detail
+                        </Button>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                </div>
+                {Object.keys(groupedFields).length === 0 && (
+                  <div className="text-center text-gray-400 col-span-full">No details yet.</div>
+                )}
                 {Object.entries(groupedFields).map(([category, fields]) => (
                   <div key={category}>
-                    <h3 className="font-semibold text-lg mb-3 text-gray-800">{category}</h3>
+                    <h3 className="font-semibold text-lg mb-3 text-gray-800">{category.charAt(0).toUpperCase() + category.slice(1)}</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                       {fields.map((field) => (
                         <div
@@ -730,8 +768,8 @@ export default function DashboardPage() {
                         >
                           <div className="flex items-start justify-between">
                             <div className="flex-1">
-                              <p className="text-sm text-gray-600">{field.label}</p>
-                              <p className="font-medium text-gray-900">{field.value}</p>
+                              <p className="text-sm text-gray-600">{field.label.charAt(0).toUpperCase() + field.label.slice(1)}</p>
+                              <p className="font-medium text-gray-900">{field.value && typeof field.value === 'string' ? field.value.charAt(0).toUpperCase() + field.value.slice(1) : field.value}</p>
                             </div>
                             <Button
                               variant="ghost"
@@ -749,29 +787,96 @@ export default function DashboardPage() {
                 ))}
               </TabsContent>
 
-              {Object.entries(groupedFields).map(([category, fields]) => (
+              {/* Render all category tabs, not just those with data */}
+              {["clothing", "favorites", "places", "gifts", "health"].map((category) => (
                 <TabsContent key={category} value={category} className="space-y-3">
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                    {fields.map((field) => (
-                      <div
-                        key={field.id}
-                        className="p-3 bg-gray-50 rounded-lg border group hover:bg-gray-100 transition-colors"
-                      >
-                        <div className="flex items-start justify-between">
-                          <div className="flex-1">
-                            <p className="text-sm text-gray-600">{field.label}</p>
-                            <p className="font-medium text-gray-900">{field.value}</p>
+                  <div className="flex justify-end mb-2 mt-6"> {/* Added mt-6 for spacing */}
+                    <Dialog>
+                      <DialogTrigger asChild>
+                        <Button size="sm" onClick={() => setNewField((prev: any) => ({ ...prev, category }))}>
+                          {categoryIconMap[category]}Add {category.charAt(0).toUpperCase() + category.slice(1)}
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Add New Detail</DialogTitle>
+                          <DialogDescription>Add a new piece of information about your partner</DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                          <div>
+                            <Label htmlFor="category">Category</Label>
+                            <Select
+                              value={newField.category}
+                              onValueChange={(value) => setNewField({ ...newField, category: value as "clothing" | "favorites" | "places" | "gifts" | "health" })}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Select category" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="clothing">Clothing</SelectItem>
+                                <SelectItem value="favorites">Favorites</SelectItem>
+                                <SelectItem value="places">Important Places</SelectItem>
+                                <SelectItem value="gifts">Gift Ideas</SelectItem>
+                                <SelectItem value="health">Health</SelectItem>
+                              </SelectContent>
+                            </Select>
                           </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => deleteField(field.id)}
-                            className="opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8 p-0"
-                          >
-                            ×
+                          {/* Dynamic fields based on category */}
+                          {categoryFieldMap[newField.category].map((field) => (
+                            <div key={field.name}>
+                              <Label htmlFor={field.name}>{field.label}</Label>
+                              {field.name === "note" ? (
+                                <Textarea
+                                  id={field.name}
+                                  value={newField[field.name] || ""}
+                                  onChange={e => setNewField({ ...newField, [field.name]: e.target.value })}
+                                  placeholder={field.placeholder}
+                                  rows={3}
+                                />
+                              ) : (
+                                <Input
+                                  id={field.name}
+                                  value={newField[field.name] || ""}
+                                  onChange={e => setNewField({ ...newField, [field.name]: e.target.value })}
+                                  placeholder={field.placeholder}
+                                />
+                              )}
+                            </div>
+                          ))}
+                          <Button onClick={addCustomField} className="w-full">
+                            Add Detail
                           </Button>
                         </div>
-                      </div>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {(groupedFields[category]?.length > 0 ? groupedFields[category] : [null]).map((field, idx) => (
+                      field ? (
+                        <div
+                          key={field.id}
+                          className="p-3 bg-gray-50 rounded-lg border group hover:bg-gray-100 transition-colors"
+                        >
+                          <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                              <p className="text-sm text-gray-600">{field.label.charAt(0).toUpperCase() + field.label.slice(1)}</p>
+                              <p className="font-medium text-gray-900">{field.value && typeof field.value === 'string' ? field.value.charAt(0).toUpperCase() + field.value.slice(1) : field.value}</p>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => deleteField(field.id)}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity h-8 w-8 p-0"
+                            >
+                              ×
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        (!groupedFields[category] || groupedFields[category].length === 0) && idx === 0 ? (
+                          <div key="empty" className="text-center text-gray-400 col-span-full">No details yet.</div>
+                        ) : null
+                      )
                     ))}
                   </div>
                 </TabsContent>
